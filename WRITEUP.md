@@ -83,20 +83,37 @@ Even with hybrid ranking and dynamic weights, a query containing numerical const
 
 ## Error Analysis
 
-While the system handles a wide variety of queries, it still struggles in a few specific areas:
+While the system handles a wide variety of queries, it still struggles in a few specific areas involving complex relationships and geographical generalizations.
 
-1. **Nuanced Business Relationships:** The system looks for semantic similarity and exact words. If a query asks for *"Companies competing with traditional banks"*, the system might struggle if the companies don't explicitly state "we compete with banks" in their descriptions.
-2. **Keyword Dominance on Mid-Length Queries:** While dynamic weighting fixed keyword dominance on *long* queries (like the packaging example), a 5 or 6-word query is still weighted 50/50. If a company has a perfect BM25 score for those 6 words, it can still occasionally outrank a slightly better semantic fit.
+* **Test Case:** *"Fast-growing fintech companies competing with traditional banks in Europe."*
+* **Extracted Filters:** `{'region': 'Europe', 'words_to_remove': ['Europe']}`
+* **Top Results:**
+```
+77.05% European Pay - european-pay.fr (sem: 0.67 | bm25: 1.00)       
+73.21% New Payment Innovation - npi.ie (sem: 1.00 | bm25: 0.11)      
+68.81% Auvergnat Cola - auvergnatcola.com (sem: 0.58 | bm25: 0.93)   
+68.38% FGC Money Transfer - fgcexchange.co.uk (sem: 0.64 | bm25: 0.79)
+67.19% CTC FUND - ctcfundlimited.com (sem: 0.83 | bm25: 0.31)        
+67.16% Telefónica Venture Builder - telefonica.com (sem: 0.71 | bm25: 0.58)
+66.26% Euro-Rijn Financial Services - erfinancial.services (sem: 0.78 | bm25: 0.38)
+65.54% Rantum Capital - rantumcapital.de (sem: 0.80 | bm25: 0.33)    
+65.24% Tietoevry - tietoevry.com (sem: 0.60 | bm25: 0.78)
+62.31% Ferring - ferring.com (sem: 0.75 | bm25: 0.32)
+```
+* **Why it failed:**
+1. **The Geographical Generalization Trap:** The LLM extracted `"Europe"` as a `region`. However, the dataset's `region_name` generally contains specific states/counties, not continents. Because no company matched "Europe" exactly, the `safe_filter` triggered, effectively canceling the location filter and doing a global search.
+2. **Stop-Words Noise (The Auvergnat Cola Error):** After removing the word "Europe", the query still contained words like *"with"*, *"in"*, and *"companies"*. Because I didn't implement a strict NLP stop-word remover, BM25 matched these highly common prepositions against random companies. This is why *Auvergnat Cola* (a French regional soda company) bizarrely reached 3rd place with a massive BM25 score of 0.93.
+3. **The Relational Trap:** The system retrieved companies like *Tietoevry* (Enterprise IT). The semantic model and BM25 recognized the correct industry domain (they saw the words "banks" and "fintech"), but neither algorithm can understand the relational constraint *"competing with"*. It retrieved software vendors that *serve* banks, rather than startups that *compete* with them.
 
 ---
 
 ## Scaling
 
-If the system needed to handle 100,000 companies per query instead of 500, the current "on-the-fly" Pandas operations and real-time embedding generation would become a massive bottleneck. To scale this, I would change the following:
+If the system needed to handle 100,000 companies per query instead of 500, the current Pandas operations and real-time embedding generation would become a massive bottleneck. To scale this, I would change the following:
 
-1. **Vector Database:** Instead of generating and comparing `document_embeddings` in RAM via `cosine_similarity`, I would pre-calculate the vectors for all 100k companies at startup and store them in a dedicated vector database, which can search through indexes in milliseconds.
-2. **BM25 Caching:** Similar to the vectors, the lexical matrix for BM25 would be pre-calculated and cached when the server loads, avoiding the need to tokenize 100,000 texts on every single query.
-3. **Batch Processing:** I would optimize parallel processing, moving the LLM from sequential mode to batch processing if there are multiple concurrent queries from different users.
+1. **Better Models:** I used a small, local embedding model (`all-MiniLM-L6-v2`) and a fast LLM (`Gemini 2.5-flash`). For a large-scale app, I would upgrade to a more advanced embedding model that understands complex contexts much better, and a stronger LLM to avoid extraction mistakes (like confusing a continent with a region).
+2. **Vector Database:** Instead of calculating `cosine_similarity` in memory every time, I would generate the embeddings for all 100k companies once at startup and save them in a Vector Database. This makes searching through massive datasets almost instant.
+3. **BM25 Caching:** Just like the embeddings, breaking down 100,000 company descriptions into words for BM25 takes too much time if done on every query. I would pre-calculate and save this data too.
 
 ---
 
@@ -112,5 +129,5 @@ The system might produce confident but incorrect results under the following con
 ## Critical Thinking Summary
 
 * **Where does the system work extremely well?** It excels at "mixed" queries that combine strict constraints (location, revenue) with broad conceptual needs (e.g., "fast-growing fintech"). The `safe_filter` ensures it never fails completely.
-* **How robust is the system to missing data?** By utilizing the `candidates[column].isna()` logic, the system ensures that companies are not wrongly excluded simply because their financial data or employee counts are private or missing from the dataset. It gives them the "benefit of the doubt" and lets the semantic ranker decide their final fate. But a company that misses crucial data ( de completat )
-* **What improvements would I prioritize next?** I would integrate a standard NLP library (like `nltk` or `spaCy`) to properly remove stop words (and, the, with) from the query *after* the LLM extraction. This would make the word-count for the Dynamic Weighting logic perfectly accurate.
+* **How robust is the system to missing data?** By using the `candidates[column].isna()` logic, the system gives companies the "benefit of the doubt". It ensures a company isn't thrown out just because its financial data or employee count is hidden or missing. **However**, if a company is missing its actual text description or core offerings, it will sink to the bottom of the list. The system easily survives missing numbers, but it absolutely needs text to calculate the Semantic and BM25 scores.
+* **What improvements would I prioritize next?** I would integrate a standard NLP library to properly remove stop words (and, the, with) from the query *after* the LLM extraction. This would make the word-count for the Dynamic Weighting logic perfectly accurate.
