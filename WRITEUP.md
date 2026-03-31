@@ -1,9 +1,11 @@
 **Approach**
+
 My approach evolved through several iterations to find balance between accuracy, speed, and scalability. I designed a pipeline that uses an LLM for precise upfront filtering, followed by a hybrid ranking mechanism (Semantic + Lexical) with dybamic weighting. 
 
 The architecture includes the following components and steps:
 
 **1. Data Formatting and Pre-processing**
+
 I noticed that fields like `address`, `primary_naics`, and `secondary_naics` were stored as strings, for some companies, containing "hidden dictionaries" or lists. To parse these faster, I created a custom parsers (using `ast.literal_eval` instead of `json.loads()` since some of the strings contained single quotes `'` instead of standard `"`).
 * Initial thought: To keep the code completely modular, I wanted to dynamically test every column to see if it needed to formatting.
 * Issue: When testing this dynamic approach on a scaled dataset (simulating 100k elements), the processing time exploded.
