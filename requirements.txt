@@ -1,0 +1,6 @@
+pandas
+google-genai
+sentence-transformers
+scikit-learn
+rank-bm25
+numpy
